@@ -48,7 +48,7 @@ Register = TypeVar("Register", bound=BaseRegister)
 class Dnp3Register(BaseRegister):
     # TODO: developed more robust logic when not connecting with an outstation.
 
-    def __init__(self, read_only, pointName, units, reg_type, default_value=None, description='',
+    def __init__(self, read_only, point_name, units, reg_type, default_value=None, description='',
                  reg_definition=None, master_application=None):
         # Note: the most important arguments are regDef and master_application
         # read_only determine whether the set_point logic can be implemented
@@ -57,14 +57,14 @@ class Dnp3Register(BaseRegister):
         self.reg_def = reg_definition
         self.master_application = master_application
         self.reg_type = reg_type
-        self.pointName = pointName
+        self.point_name = point_name
 
         self._value = None  # use _value as cache
         self.group = int(reg_definition.get("Group"))
         self.variation = int(reg_definition.get("Variation"))
         self.index = int(reg_definition.get("Index"))
 
-        super().__init__("byte", read_only, pointName, units, description='')
+        super().__init__("byte", read_only, point_name, units, description='')
 
     @property
     def value(self) -> RegisterValue:
@@ -74,8 +74,8 @@ class Dnp3Register(BaseRegister):
                                             variation=self.variation,
                                             index=self.index)
             if value is None:
-                _log.warning(f"Register value for pointName {self.pointName} is None.")
-                # raise ValueError(f"Register value for pointName {self.pointName} is None. Hence not publish.")
+                _log.warning(f"Register value for point_name {self.point_name} is None.")
+                # raise ValueError(f"Register value for point_name {self.point_name} is None. Hence not publish.")
                 # TODO: figure out an elegant way to not publish None values.
             self._value = value
             return self._value
