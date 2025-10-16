@@ -136,11 +136,11 @@ class Dnp3Driver(BasicRevert, BaseInterface):
         if self.master_application is None:
             driver_config = config_dict
             self.master_application = MyMasterNew(
-                masterstation_ip_str=driver_config.get("master_ip"),
-                outstation_ip_str=driver_config.get("outstation_ip"),
+                masterstation_ip=driver_config.get("master_ip"),
+                outstation_ip=driver_config.get("outstation_ip"),
                 port=driver_config.get("port"),
-                masterstation_id_int=driver_config.get("master_id"),
-                outstation_id_int=driver_config.get("outstation_id"),
+                masterstation_id=driver_config.get("master_id"),
+                outstation_id=driver_config.get("outstation_id"),
             )
             self.master_application.start()  # TODO: complete the self.master_application.stop() logic
         self.parse_config(registry_config_str)
