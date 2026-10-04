@@ -8,8 +8,10 @@ from pydantic import ValidationError
 
 from volttron.driver.base.config import RemoteConfig
 from volttron.driver.base.interfaces import DriverInterfaceError
-from volttron.driver.interfaces.dnp3.config import ControlCode, ControlMode, Dnp3PointConfig, Dnp3RemoteConfig, ReadMode
+from volttron.driver.interfaces.dnp3.config import ControlCode, ControlMode, Dnp3PointConfig, Dnp3RemoteConfig, DriverRole, ReadMode
 from volttron.driver.interfaces.dnp3.dnp3 import Dnp3
+
+from volttron.driver.base.proxy_interface import READ_ONLY as READ_ONLY_MESSAGE
 
 from tests.conftest import IDENTITY, STANDARD_POINTS, TOPIC, point, reading, serialized
 
@@ -67,7 +69,7 @@ class TestRemoteConfig:
                                            'unsolicited': False, 'unsolicited_classes': [1, 3]}
 
     def test_rejections(self):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError, match='needs the outstation_ip'):
             Dnp3RemoteConfig(driver_type='dnp3')
         with pytest.raises(ValidationError, match='classes are 0 to 3'):
             Dnp3RemoteConfig(driver_type='dnp3', host='h', poll_classes=[4])
@@ -108,8 +110,8 @@ class TestSetup:
         iface.finalize_setup(initial_setup=True)
         assert ppm.launch == (('dnp3',), {}) and ppm.registration_waits == [30.0] and iface.proxy_peer is ppm.peer
         (method, payload, expects_reply), = ppm.sent
-        assert method == 'REGISTER_OUTSTATION' and expects_reply
-        assert payload == {**IDENTITY, 'response_timeout': 5.0, 'link_reset': True, 'integrity_poll_interval': 600.0,
+        assert method == 'REGISTER_REMOTE' and expects_reply
+        assert payload == {'role': 'master', **IDENTITY, 'response_timeout': 5.0, 'link_reset': True, 'integrity_poll_interval': 600.0,
                            'unsolicited': True, 'unsolicited_classes': [1], 'remote_id': iface.remote_id.hex,
                            'points': [iface.point_map[t].point_fields(t) for t in iface.point_map]}
         assert payload['points'][0] == {'topic': TOPIC('AI_2'), 'group': 30, 'variation': 6, 'index': 2, 'scaling': 0.1,
@@ -128,7 +130,7 @@ class TestSetup:
 
     def test_unique_remote_id(self):
         remote = RemoteConfig(driver_type='dnp3', outstation_ip='10.0.0.5', port=20001, outstation_id=3)
-        assert Dnp3.unique_remote_id('devices/x', remote) == ('dnp3', '10.0.0.5', 20001, 3)
+        assert Dnp3.unique_remote_id('devices/x', remote) == ('dnp3', 'master', '10.0.0.5', 20001, 3)
 
     def test_reads_before_setup_raise(self, make_interface):
         iface = make_interface(STANDARD_POINTS)
@@ -252,3 +254,85 @@ class TestUnsolicited:
             interface.receive_push.__wrapped__(interface, None, b'not json')
         assert 'Error received with pushed values from the DNP3 Proxy' in caplog.text and 'Undecodable' in caplog.text
         assert not driver_agent.publish_push.called
+
+
+SERVED = {'driver_type': 'dnp3', 'driver_role': 'outstation', 'bind_host': '127.0.0.1', 'port': 20010, 'outstation_id': 4,
+          'master_id': 3}
+SERVED_POINTS = [
+    point('AI_2', 30, 2, 6, scaling=0.1, units='Volts', writable=True, data_source='server', default_value='240.1'),
+    point('BI_0', 1, 0, 2, writable=True, data_source='server', event_class=2),
+    point('AO_1', 40, 1, 1, writable=True, data_source='server', remote_writable=False),
+    point('BO_3', 10, 3, 2, writable=True, data_source='server'),
+    point('CTR_5', 20, 5, 1, writable=False, data_source='server'),
+]
+
+
+class TestOutstationRole:
+    def test_role_values_and_fields(self):
+        cfg = Dnp3RemoteConfig(**SERVED)
+        assert cfg.driver_role is DriverRole.outstation and cfg.is_server and cfg.outstation_ip is None
+        assert Dnp3RemoteConfig(driver_type='dnp3', driver_role='Server', port=1).driver_role is DriverRole.outstation
+        assert Dnp3RemoteConfig(driver_type='dnp3', driver_role='client', host='h').driver_role is DriverRole.master
+        assert Dnp3RemoteConfig(driver_type='dnp3', host='h').driver_role is DriverRole.master
+        assert cfg.outstation_fields() == {'host': '127.0.0.1', 'port': 20010, 'master_address': 3, 'outstation_address': 4}
+        assert cfg.connection_fields() == {'unsolicited': False, 'unsolicited_classes': [1, 2, 3]}
+        with pytest.raises(ValidationError):
+            Dnp3RemoteConfig(driver_type='dnp3', driver_role='relay', host='h')
+
+    def test_served_rows_may_be_writable_inputs_and_carry_class_and_remote_writable(self):
+        row = Dnp3PointConfig(**{'Volttron Point Name': 'AI_2', 'Group': '30', 'Index': '2', 'Writable': 'TRUE',
+                                 'Data Source': 'server', 'Class': '2', 'Remote Writable': '', 'Starting Value': '5'})
+        assert row.is_served and row.event_class == 2 and row.resolved_remote_writable is False and row.default_value == '5'
+        assert Dnp3PointConfig(volttron_point_name='x', group=10, index=0, data_source='server').resolved_remote_writable
+        with pytest.raises(ValidationError, match='cannot be writable'):
+            Dnp3PointConfig(volttron_point_name='x', group=30, index=0, writable=True)      # not served: still refused
+        with pytest.raises(ValidationError):
+            Dnp3PointConfig(volttron_point_name='x', group=30, index=0, data_source='server', event_class=4)
+
+    def test_prepare_registry_config_defaults_served_rows(self, make_interface):
+        iface = make_interface(**SERVED)
+        rows = [{'Volttron Point Name': 'AI_2', 'Group': 30, 'Index': 2},
+                {'Volttron Point Name': 'AI_3', 'Group': 30, 'Index': 3, 'Writable': 'FALSE', 'Data Source': 'static'}]
+        prepared = iface.prepare_registry_config(rows, RemoteConfig(**SERVED))
+        assert prepared[0] == {'Volttron Point Name': 'AI_2', 'Group': 30, 'Index': 2, 'data_source': 'server', 'writable': True}
+        assert prepared[1] == rows[1]
+        assert iface.prepare_registry_config(rows, RemoteConfig(driver_type='dnp3', outstation_ip='h')) == rows
+        assert [Dnp3PointConfig(**r).is_served for r in prepared] == [True, False]
+
+    def test_registration_payload_describes_the_served_outstation(self, make_interface, ppm):
+        iface = make_interface(SERVED_POINTS, **SERVED)
+        ppm.queue(serialized({'server': 'outstation:127.0.0.1:20010:4', 'points': 5, 'role': 'outstation'}))
+        iface.finalize_setup(initial_setup=True)
+        (method, payload, _), = ppm.sent
+        assert method == 'REGISTER_REMOTE'
+        assert {k: v for k, v in payload.items() if k != 'points'} == {
+            'role': 'outstation', 'host': '127.0.0.1', 'port': 20010, 'master_address': 3, 'outstation_address': 4,
+            'unsolicited': False, 'unsolicited_classes': [1, 2, 3], 'remote_id': iface.remote_id.hex}
+        by_topic = {p['topic']: p for p in payload['points']}
+        assert by_topic[TOPIC('AI_2')] == {'topic': TOPIC('AI_2'), 'group': 30, 'variation': 6, 'index': 2, 'scaling': 0.1,
+                                           'control_code': 'latch', 'count': 1, 'on_time': 0, 'off_time': 0,
+                                           'event_class': 1, 'remote_writable': False, 'initial_value': 240.1}
+        assert (by_topic[TOPIC('BI_0')]['event_class'], by_topic[TOPIC('BI_0')]['initial_value']) == (2, None)
+        assert by_topic[TOPIC('AO_1')]['remote_writable'] is False and by_topic[TOPIC('BO_3')]['remote_writable'] is True
+
+    def test_served_writes_store_values_and_are_reflected(self, make_interface, ppm, driver_agent):
+        iface = make_interface(SERVED_POINTS, **SERVED)
+        iface.proxy_peer = ppm.peer
+        ppm.queue(serialized({TOPIC('AI_2'): {'status': 'SUCCESS', 'value': 230.0}, TOPIC('BI_0'): {'status': 'SUCCESS', 'value': True}},
+                             {TOPIC('CTR_5'): 'bad value'}))
+        results, errors = iface.set_multiple_points([(TOPIC('AI_2'), '230'), (TOPIC('BI_0'), 'on'), (TOPIC('CTR_5'), 1)])
+        assert results == {TOPIC('AI_2'): 230.0, TOPIC('BI_0'): True} and errors == {TOPIC('CTR_5'): READ_ONLY_MESSAGE}
+        [(method, payload, _)] = ppm.sent
+        assert method == 'WRITE_POINTS'
+        assert payload == {'operations': [{'topic': TOPIC('AI_2'), 'value': 230.0}, {'topic': TOPIC('BI_0'), 'value': True}]}
+        driver_agent.publish_push.assert_called_once_with({TOPIC('AI_2'): 230.0, TOPIC('BI_0'): True})
+
+    def test_reads_report_served_values(self, make_interface, ppm):
+        iface = make_interface(SERVED_POINTS, **SERVED)
+        iface.proxy_peer = ppm.peer
+        ppm.queue(serialized({TOPIC('AI_2'): reading(240.1), TOPIC('BI_0'): reading(False, quality=2, online=False)}))
+        results, errors = iface.get_multiple_points([TOPIC('AI_2'), TOPIC('BI_0')])
+        assert results == {TOPIC('AI_2'): 240.1} and 'offline' in errors[TOPIC('BI_0')]
+
+    def test_unique_remote_id_includes_the_role(self):
+        assert Dnp3.unique_remote_id('devices/x', RemoteConfig(**SERVED)) == ('dnp3', 'outstation', '127.0.0.1', 20010, 4)

@@ -21,13 +21,21 @@
 #
 # ===----------------------------------------------------------------------===
 # }}}
-"""DNP3 (IEEE 1815) master interface for the VOLTTRON Platform Driver.
+"""DNP3 (IEEE 1815) interface for the VOLTTRON Platform Driver: a master reaching an outstation (``driver_role:
+master``, the default) or an outstation served to a remote master (``driver_role: outstation``).
 
 The protocol runs in a DNP3 Protocol Proxy process (``protocol_proxy.protocol.dnp3``, built on dnp3py); this interface
-registers the outstation and its points with that proxy, asks it to read and operate points by their full topics, and
-publishes the unsolicited responses it pushes back. The exchange itself (registration, reply parsing, batching, pushes,
-failure handling) is :class:`ProxyBackedInterface`; this module holds what is DNP3: the point table, the read modes, the
-control modes, quality handling and value coercion.
+registers the remote and its points with that proxy, asks it to read and write points by their full topics, and
+publishes what the proxy pushes back: unsolicited responses in the master role, the remote master's controls in the
+outstation role. The exchange itself (registration, reply parsing, batching, pushes, failure handling) is
+:class:`ProxyBackedInterface`; this module holds what is DNP3: the point table, the read modes, the control modes,
+quality handling and value coercion.
+
+In the outstation role the configured points are the served values. ``set_point`` stores a value for the master to
+read (and reflects it into the equipment tree at once), ``get_multiple_points`` reports what the proxy holds, and a
+control the master operates arrives as a push. Served rows default to ``data_source: server``, so they are never polled,
+and to ``writable`` (the platform may set them); ``Remote Writable`` says which the master may operate (outputs by
+default).
 """
 from gevent import monkey
 monkey.patch_socket()
@@ -40,7 +48,9 @@ from typing import Any, cast
 from volttron.driver.base.interfaces import BaseInterface, BaseRegister, BasicRevert
 from volttron.driver.base.proxy_interface import PointError, ProxyBackedInterface
 
-from .config import ControlMode, Dnp3PointConfig, Dnp3RemoteConfig, OUTPUT_GROUPS
+from volttron.driver.base.config import RemoteConfig
+
+from .config import ControlMode, Dnp3PointConfig, Dnp3RemoteConfig, DriverRole, OUTPUT_GROUPS, ROLE_ALIASES
 
 _log = logging.getLogger(__name__)
 
@@ -66,28 +76,35 @@ class Dnp3Register(BaseRegister):
         self.count, self.on_time, self.off_time = point.count, point.on_time, point.off_time
         self.python_type = bool if point.group in BIT_GROUPS else int if point.group in COUNTER_GROUPS else float
         self.default_value: Any = None     # Value to revert to, already coerced to python_type; None if unset.
+        # Served outstations only.
+        self.event_class = point.event_class
+        self.remote_writable = point.resolved_remote_writable
 
     @property
     def is_output(self) -> bool:
         return self.group in OUTPUT_GROUPS
 
-    def point_fields(self, topic: str) -> dict:
-        """This register's entry in the REGISTER_OUTSTATION point table."""
-        return {'topic': topic, 'group': self.group, 'variation': self.variation, 'index': self.index,
-                'scaling': self.scaling, 'control_code': self.control_code.value, 'count': self.count,
-                'on_time': self.on_time, 'off_time': self.off_time}
+    def point_fields(self, topic: str, served: bool = False) -> dict:
+        """This register's entry in the registration point table; a served point adds what serving it needs."""
+        fields = {'topic': topic, 'group': self.group, 'variation': self.variation, 'index': self.index,
+                  'scaling': self.scaling, 'control_code': self.control_code.value, 'count': self.count,
+                  'on_time': self.on_time, 'off_time': self.off_time}
+        if served:
+            fields.update({'event_class': 1 if self.event_class is None else self.event_class,
+                           'remote_writable': self.remote_writable, 'initial_value': self.default_value})
+        return fields
 
     def __repr__(self) -> str:
         return f'Dnp3Register({self.point_name!r}, g{self.group}v{self.variation} i{self.index})'
 
 
 class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
-    """Platform Driver interface for a DNP3 outstation, served by the DNP3 Protocol Proxy."""
+    """Platform Driver interface for DNP3 in either role, served by the DNP3 Protocol Proxy."""
 
     REGISTER_CONFIG_CLASS = Dnp3PointConfig
     INTERFACE_CONFIG_CLASS = Dnp3RemoteConfig
     PROXY_NAME, PROXY_LABEL = 'dnp3', 'DNP3 Proxy'
-    REGISTER_METHOD, READ_METHOD, WRITE_METHOD = 'REGISTER_OUTSTATION', 'READ_POINTS', 'WRITE_POINTS'
+    REGISTER_METHOD, READ_METHOD, WRITE_METHOD = 'REGISTER_REMOTE', 'READ_POINTS', 'WRITE_POINTS'
     PUSH_METHOD = 'RECEIVE_UNSOLICITED'
     REQUEST_ERROR_KEY = 'link'
 
@@ -98,6 +115,22 @@ class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
         self.init_proxy()
 
     # ---- registers --------------------------------------------------------------------------------------------
+    def prepare_registry_config(self, registry_config: list[dict], remote_config: RemoteConfig | None = None) -> list[dict]:
+        """In the outstation role, rows default to the ``server`` data source and to being writable by the platform."""
+        role = getattr(remote_config, 'driver_role', None) if remote_config is not None else self.config.driver_role
+        role = getattr(role, 'value', role)
+        if ROLE_ALIASES.get(role, role) != DriverRole.outstation.value:
+            return registry_config
+        prepared = []
+        for row in registry_config:
+            row = dict(row)
+            if _blank(row, 'data_source', 'Data Source'):
+                row['data_source'] = 'server'
+            if _blank(row, 'writable', 'Writable'):
+                row['writable'] = True
+            prepared.append(row)
+        return prepared
+
     def create_register(self, register_definition: Dnp3PointConfig) -> Dnp3Register:
         register = Dnp3Register(register_definition)
         if register_definition.writable and register_definition.default_value not in (None, ''):
@@ -115,17 +148,29 @@ class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
             self.set_default('/'.join([base_topic, register.point_name]), register.default_value)
 
     # ---- the proxy exchange, in DNP3 terms ----------------------------------------------------------------------
+    @property
+    def is_server(self) -> bool:
+        return self.config.is_server
+
     def identity_fields(self) -> dict:
-        return self.config.outstation_fields()
+        return {'role': self.config.driver_role.value, **self.config.outstation_fields()}
+
+    def point_fields(self, topic: str, register: BaseRegister) -> dict:
+        return cast(Dnp3Register, register).point_fields(topic, served=self.is_server)
 
     def registration_payload(self) -> dict:
-        return {**self.config.outstation_fields(), **self.config.connection_fields(),
-                'points': [register.point_fields(topic) for topic, register in self.point_map.items()]}
+        return {**self.identity_fields(), **self.config.connection_fields(),
+                'points': [self.point_fields(topic, register) for topic, register in self.point_map.items()]}
 
     def after_registration(self, result: dict, initial_setup: bool):
-        _log.info(f"DNP3 outstation {self.config.outstation_ip}:{self.config.port} registered with the proxy as"
-                  f" {result.get('client')} with {result.get('points')} points"
-                  f"{', unsolicited reporting on' if self.config.unsolicited else ''}.")
+        if self.is_server:
+            _log.info(f"DNP3 outstation {self.config.outstation_id} is served on {self.config.bind_host}:{self.config.port}"
+                      f" to master {self.config.master_id} by the proxy as {result.get('server')} with"
+                      f" {result.get('points')} points.")
+        else:
+            _log.info(f"DNP3 outstation {self.config.outstation_ip}:{self.config.port} registered with the proxy as"
+                      f" {result.get('client')} with {result.get('points')} points"
+                      f"{', unsolicited reporting on' if self.config.unsolicited else ''}.")
 
     def read_payload(self, topics: list[str], mode: str | None = None, classes=None, **kwargs) -> dict:
         """``mode`` is class (the remote's ``poll_classes``), integrity or points; polls use the remote's read mode."""
@@ -147,13 +192,23 @@ class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
         return self._coerce(cast(Dnp3Register, register), value)
 
     def split_writes(self, items: list[tuple[str, Any]], **kwargs) -> list[tuple[dict, list[tuple[str, Any]]]]:
-        """One WRITE_POINTS per control mode: a point's own mode, else the outstation's."""
+        """One WRITE_POINTS per control mode: a point's own mode, else the outstation's. A served outstation stores
+        values rather than operating controls, so all of its writes go in one request."""
+        if self.is_server:
+            return [({'operations': [{'topic': topic, 'value': value} for topic, value in items]}, list(items))]
         batches: dict[str, list[tuple[str, Any]]] = defaultdict(list)
         for topic, value in items:
             register = cast(Dnp3Register, self.point_map[topic])
             batches[(register.control_mode or self.config.control_mode).value].append((topic, value))
         return [({'control_mode': mode, 'operations': [{'topic': topic, 'value': value} for topic, value in batch]}, batch)
                 for mode, batch in batches.items()]
+
+    def interpret_write(self, items: list[tuple[str, Any]], result: Any, request_errors: Any) -> tuple[dict, dict]:
+        results, errors = super().interpret_write(items, result, request_errors)
+        if self.is_server and results:
+            # The served values changed: reflect them into the equipment tree and publish, as a master's write would be.
+            self.driver_agent.publish_push(dict(results))
+        return results, errors
 
     # ---- helpers ----------------------------------------------------------------------------------------------
     @staticmethod
@@ -176,6 +231,12 @@ class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
 
     @classmethod
     def unique_remote_id(cls, config_name: str, config) -> tuple:
-        """Identifies the outstation: one DriverAgent per outstation address at a host and port."""
+        """Identifies the remote: one DriverAgent per outstation address at a host and port, in each role."""
         cfg = cls.INTERFACE_CONFIG_CLASS(**config.model_dump())
-        return 'dnp3', cfg.outstation_ip, cfg.port, cfg.outstation_id
+        host = cfg.bind_host if cfg.is_server else cfg.outstation_ip
+        return 'dnp3', cfg.driver_role.value, host, cfg.port, cfg.outstation_id
+
+
+def _blank(row: dict, *keys: str) -> bool:
+    """Whether none of ``keys`` carries a value in a registry row."""
+    return all(row.get(key) in (None, '') for key in keys)

@@ -51,10 +51,12 @@ vctl config store platform.driver devices/campus/building/der example-config/dnp
 
 | Key | Default | Meaning |
 |---|---|---|
-| `outstation_ip` (or `host`) | required | Outstation address. |
+| `driver_role` | `master` | `master` (or `client`) reaches the outstation below; `outstation` (or `server`) serves one to a remote master, see [Outstation role](#outstation-role). |
+| `outstation_ip` (or `host`) | required for a master | Outstation address. |
+| `bind_host` | `0.0.0.0` | Outstation role: the interface the served outstation listens on. |
 | `port` | 20000 | Outstation TCP port. |
 | `master_id` (or `master_address`) | 2 | DNP3 link address of this master. |
-| `outstation_id` (or `outstation_address`) | 1 | DNP3 link address of the outstation. One DriverAgent per `(outstation_ip, port, outstation_id)`. |
+| `outstation_id` (or `outstation_address`) | 1 | DNP3 link address of the outstation. One DriverAgent per `(driver_role, outstation_ip or bind_host, port, outstation_id)`. |
 | `control_mode` | `direct` | How outputs are operated unless a point says otherwise: `direct` (DIRECT_OPERATE) or `sbo` (SELECT then OPERATE; OPERATE is sent only when the SELECT echo accepts every control). |
 | `read_mode` | `class` | What a scheduled poll requests: `class` reads the data classes in `poll_classes`, `integrity` reads Class 0, 1, 2 and 3, `points` issues range reads of exactly the polled points. `get_point` always uses a range read. |
 | `poll_classes` | `[0]` | Data classes read by a `class` poll. Class 0 is the static data. |
@@ -83,7 +85,11 @@ DGEN.WHrtg,CTR_5000,20,1,5000,1,Wh,FALSE,,,Energy counter
 | `Group`, `Variation`, `Index` | The point's DNP3 object group, variation and index. Groups read: 1, 2 (binary inputs), 3, 4 (double-bit inputs), 10, 11 (binary outputs), 20, 21, 22 (counters), 30, 32 (analog inputs), 40, 42 (analog outputs). A blank variation takes the usual one for the group (g1v2, g10v2, g20v1, g30v6, g40v4). For a writable analog output the registered group 40 variation also picks the group 41 command variation (1 INT32, 2 INT16, 3 FLT32, 4 FLT64). |
 | `Scaling` | Multiplier applied by the proxy: published value = outstation value x scaling; writes divide by it. Blank is 1. |
 | `Units` | Units reported in the publish metadata. |
-| `Writable` | TRUE for an output the platform may operate. Only groups 10 and 40 may be writable. |
+| `Writable` | TRUE for an output the platform may operate. Only groups 10 and 40 may be writable, except for served points (`Data Source` `server`), which the platform writes whatever their group. |
+| `Data Source` | `short_poll` by default: polled on the device's schedule. `never_poll` for points that arrive only by unsolicited response; `server` for served points (the default in the outstation role), which are never polled. See the platform driver's documentation for the other kinds. |
+| `Remote Writable` | Outstation role: TRUE if the remote master may operate this served point. Blank means outputs (groups 10 and 40) are, inputs and counters are not. |
+| `Class` (or `Event Class`) | Outstation role: the event class (1 to 3, or 0 for none) the point's changes are buffered in for the master's event polls. Blank is 1. Analog outputs raise no events. |
+| `Starting Value` | Outstation role: the value the point holds until something writes it. (Also accepted as `Default Value`, the master role's revert value.) |
 | `Control Mode` | Per-point override of the outstation's `control_mode`: `direct` or `sbo`. |
 | `Control Code` | For binary outputs: `latch` (default; true latches on, false latches off) or `pulse` (true pulses on, false pulses off) with `On Time`, `Off Time` (milliseconds) and `Count`. |
 | `Default Value` | The value `revert` writes when the point has no clean value yet. |
@@ -108,6 +114,48 @@ receives unsolicited values is still read on the regular schedule as well.
 
 `Transform` and `Scaling` both describe the raw-to-engineering conversion. Scaling is applied by the proxy; the
 `Transform` expression is not yet applied by any interface and belongs in the base driver.
+
+## Outstation role
+
+With `"driver_role": "outstation"` the device *is* an outstation: the proxy listens on `bind_host:port` as DNP3 address
+`outstation_id` for the master at `master_id`, and the registry rows are the points it serves.
+
+```json
+{
+    "remote_config": {
+        "driver_type": "dnp3",
+        "driver_role": "outstation",
+        "bind_host": "0.0.0.0",
+        "port": 20000,
+        "master_id": 2,
+        "outstation_id": 1
+    },
+    "registry_config": "config://served.csv"
+}
+```
+
+```csv
+Volttron Point Name,Group,Variation,Index,Scaling,Units,Writable,Remote Writable,Class,Starting Value
+AI_2,30,6,2,0.1,Volts,TRUE,,1,240.0
+BI_0,1,2,0,,,TRUE,,2,FALSE
+AO_1,40,1,1,10,,TRUE,TRUE,,100
+BO_3,10,2,3,,,TRUE,TRUE,,FALSE
+```
+
+* Rows default to `Data Source` `server` and `Writable` TRUE (`prepare_registry_config`), so served points are never
+  polled and the platform may set any of them: `set_point` / `set_multiple_points` store the value the master will read,
+  and the interface reflects the stored value into the equipment tree and publishes it at once (the driver's push path).
+  `revert` restores `Starting Value`.
+* `get_point` / `get_multiple_points` report what the proxy currently holds; nothing is read on a schedule.
+* A control the master operates on a `Remote Writable` point is accepted by the proxy, stored, and pushed to this
+  interface, which publishes it like a change of value and records it as the point's last value. Controls on other points
+  are refused in-protocol (BLOCKED, or NOT_SUPPORTED for an unregistered index) and never reach the platform.
+  Reservations on the device apply to VOLTTRON actors only; the master's writes are governed by `Remote Writable` alone.
+* The master's polls (class 0 for static data, classes 1 to 3 for the buffered events, integrity for all) are answered
+  by the proxy; dnp3py's runner does not transmit unsolicited responses on its own, so events wait for an event poll.
+* On every (re)registration the proxy pushes its whole served table, so a proxy restart repairs the platform's values
+  and a platform restart (which re-registers) repairs nothing yet beyond `Starting Value`: two-way seeding is the next
+  step of the server-side plan.
 
 ## Testing
 

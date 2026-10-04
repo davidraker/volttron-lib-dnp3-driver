@@ -7,7 +7,7 @@ profile = "black"
 
 [tool.poetry]
 name = "volttron-lib-dnp3-driver"
-version = "2.0.0rc0"
+version = "2.0.0rc1"
 description = "DNP3 (IEEE 1815) master driver interface for the VOLTTRON Platform Driver, served by the DNP3 Protocol Proxy."
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache-2.0"
@@ -27,8 +27,8 @@ classifiers = [
 
 [tool.poetry.dependencies]
 python = ">=3.11,<4.0"
-volttron-lib-base-driver = ">=2.0.0rc6"
-protocol-proxy-dnp3 = ">=2.0.0rc0"
+volttron-lib-base-driver = ">=2.0.0rc7"
+protocol-proxy-dnp3 = ">=2.0.0rc1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = ">=7.0"

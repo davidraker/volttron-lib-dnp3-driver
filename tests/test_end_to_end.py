@@ -14,7 +14,9 @@ import pytest
 pytest.importorskip('dnp3.outstation')
 
 HARNESS = Path(__file__).with_name('e2e_harness.py')
+SERVER_HARNESS = Path(__file__).with_name('e2e_server_harness.py')
 EXPECTED_CHECKS = 13
+EXPECTED_SERVER_CHECKS = 15
 
 
 def _free_port() -> int:
@@ -23,12 +25,21 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def test_end_to_end(tmp_path):
-    log = tmp_path / 'e2e.log'
-    proc = subprocess.run([sys.executable, str(HARNESS), str(_free_port())], capture_output=True, text=True,
+def _run(harness: Path, log: Path, expected: int):
+    proc = subprocess.run([sys.executable, str(harness), str(_free_port())], capture_output=True, text=True,
                           timeout=180, env={**os.environ, 'DNP3_E2E_LOG': str(log)})
     report = proc.stdout + proc.stderr
     if proc.returncode != 0 and log.exists():
         report += '\n--- log ---\n' + log.read_text()[-4000:]
     assert proc.returncode == 0, report
-    assert f'{EXPECTED_CHECKS}/{EXPECTED_CHECKS} passed' in proc.stdout, report
+    assert f'{expected}/{expected} passed' in proc.stdout, report
+
+
+def test_end_to_end(tmp_path):
+    """Master role against dnp3py's own outstation."""
+    _run(HARNESS, tmp_path / 'e2e.log', EXPECTED_CHECKS)
+
+
+def test_end_to_end_outstation_role(tmp_path):
+    """Outstation role served by the proxy, read and operated by a master-role interface through the same proxy."""
+    _run(SERVER_HARNESS, tmp_path / 'e2e_server.log', EXPECTED_SERVER_CHECKS)

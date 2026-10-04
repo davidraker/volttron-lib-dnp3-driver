@@ -21,7 +21,9 @@
 #
 # ===----------------------------------------------------------------------===
 # }}}
-"""Configuration models for the DNP3 driver interface: one registry row and one outstation.
+"""Configuration models for the DNP3 driver interface: one registry row and one remote, which is either an outstation
+this driver reaches as a master (``driver_role: master``, the default) or an outstation this driver serves to a remote
+master (``driver_role: outstation``).
 
 Kept free of protocol_proxy imports so configuration tooling can validate registries without the proxy installed.
 """
@@ -30,7 +32,16 @@ from typing import Any
 
 from pydantic import AliasChoices, Field, field_validator, model_validator
 
-from volttron.driver.base.config import PointConfig, RemoteConfig
+from volttron.driver.base.config import DataSource, PointConfig, RemoteConfig
+
+
+class DriverRole(str, Enum):
+    """Which side of DNP3 this remote is. ``client`` and ``server`` are accepted for the two."""
+    master = 'master'
+    outstation = 'outstation'
+
+
+ROLE_ALIASES = {'client': 'master', 'server': 'outstation'}
 
 
 class ControlMode(str, Enum):
@@ -79,7 +90,10 @@ class Dnp3PointConfig(PointConfig):
     count: int = Field(default=1, ge=1, validation_alias=AliasChoices('count', 'Count'))
     on_time: int = Field(default=0, ge=0, validation_alias=AliasChoices('on_time', 'On Time'))      # milliseconds
     off_time: int = Field(default=0, ge=0, validation_alias=AliasChoices('off_time', 'Off Time'))   # milliseconds
-    default_value: Any = Field(default=None, validation_alias=AliasChoices('default_value', 'Default Value'))
+    default_value: Any = Field(default=None, validation_alias=AliasChoices('default_value', 'Default Value', 'Starting Value'))
+    # Served outstations: the event class (1 to 3; 0 for none) the point's changes are buffered in.
+    event_class: int | None = Field(default=None, ge=0, le=3,
+                                    validation_alias=AliasChoices('event_class', 'Event Class', 'Class'))
     description: str = Field(default='', validation_alias=AliasChoices('description', 'Description'))
     # TODO: transform is not yet implemented; it should be handled by the base driver for all interfaces.
     transform: str = Field(default='', validation_alias=AliasChoices('transform', 'Transform'))
@@ -92,7 +106,8 @@ class Dnp3PointConfig(PointConfig):
             for key in list(data):
                 if key in ('variation', 'Variation', 'scaling', 'Scaling', 'multiplier', 'Multiplier', 'control_mode',
                            'Control Mode', 'control_code', 'Control Code', 'count', 'Count', 'on_time', 'On Time',
-                           'off_time', 'Off Time', 'default_value', 'Default Value') and _blank_to_none(data[key]) is None:
+                           'off_time', 'Off Time', 'default_value', 'Default Value', 'Starting Value', 'event_class',
+                           'Event Class', 'Class') and _blank_to_none(data[key]) is None:
                     del data[key]
         return data
 
@@ -106,9 +121,19 @@ class Dnp3PointConfig(PointConfig):
         if self.group not in SUPPORTED_GROUPS:
             raise ValueError(f'Point {self.volttron_point_name}: group {self.group} is not one the DNP3 driver reads'
                              f' ({sorted(SUPPORTED_GROUPS)}).')
-        if self.writable and self.group not in OUTPUT_GROUPS:
+        if self.writable and self.group not in OUTPUT_GROUPS and not self.is_served:
             raise ValueError(f'Point {self.volttron_point_name}: group {self.group} is not an output and cannot be writable.')
         return self
+
+    @property
+    def is_served(self) -> bool:
+        """A served point (``data_source: server``): the platform writes it whatever its group."""
+        return self.data_source is DataSource.SERVER
+
+    @property
+    def resolved_remote_writable(self) -> bool:
+        """Whether a remote master may operate this served point: as configured, else when it is an output."""
+        return self.remote_writable if self.remote_writable is not None else self.group in OUTPUT_GROUPS
 
     @property
     def resolved_variation(self) -> int:
@@ -116,9 +141,14 @@ class Dnp3PointConfig(PointConfig):
 
 
 class Dnp3RemoteConfig(RemoteConfig):
-    """One outstation. Keys from the previous driver (`master_ip`, `outstation_ip`, `master_id`, `outstation_id`) are
-    accepted, so existing device configurations keep working."""
-    outstation_ip: str = Field(validation_alias=AliasChoices('outstation_ip', 'host', 'device_address'))
+    """One remote: the outstation to reach (role ``master``) or the outstation to serve (role ``outstation``). Keys from
+    the previous driver (`master_ip`, `outstation_ip`, `master_id`, `outstation_id`) are accepted, so existing device
+    configurations keep working."""
+    driver_role: DriverRole = DriverRole.master
+    # Master role: the outstation's address. Required in that role.
+    outstation_ip: str | None = Field(default=None, validation_alias=AliasChoices('outstation_ip', 'host', 'device_address'))
+    # Outstation role: the interface to listen on.
+    bind_host: str = Field(default='0.0.0.0', validation_alias=AliasChoices('bind_host', 'listen_host'))
     port: int = 20000
     master_id: int = Field(default=2, validation_alias=AliasChoices('master_id', 'master_address'))
     outstation_id: int = Field(default=1, validation_alias=AliasChoices('outstation_id', 'outstation_address'))
@@ -145,6 +175,24 @@ class Dnp3RemoteConfig(RemoteConfig):
     def _lower(cls, v):
         return v.lower().strip() if isinstance(v, str) else v
 
+    @field_validator('driver_role', mode='before')
+    @classmethod
+    def _role(cls, v):
+        if isinstance(v, str):
+            v = v.lower().strip() or 'master'
+            return ROLE_ALIASES.get(v, v)
+        return DriverRole.master if v is None else v
+
+    @model_validator(mode='after')
+    def _check_role_fields(self):
+        if self.driver_role is DriverRole.master and not self.outstation_ip:
+            raise ValueError('A DNP3 master needs the outstation_ip (or host) of the outstation to reach.')
+        return self
+
+    @property
+    def is_server(self) -> bool:
+        return self.driver_role is DriverRole.outstation
+
     @field_validator('poll_classes', 'unsolicited_classes', mode='before')
     @classmethod
     def _classes(cls, v):
@@ -164,12 +212,14 @@ class Dnp3RemoteConfig(RemoteConfig):
         return ('dnp3',) if self.proxy_group is None else ('dnp3', self.proxy_group)
 
     def outstation_fields(self) -> dict:
-        """The identity sent with every message to the proxy."""
-        return {'host': self.outstation_ip, 'port': self.port, 'master_address': self.master_id,
-                'outstation_address': self.outstation_id}
+        """What identifies the remote to the proxy: the outstation to reach, or the listener and addresses to serve."""
+        return {'host': self.bind_host if self.is_server else self.outstation_ip, 'port': self.port,
+                'master_address': self.master_id, 'outstation_address': self.outstation_id}
 
     def connection_fields(self) -> dict:
-        """Connection and polling settings sent with REGISTER_OUTSTATION."""
+        """Connection and polling settings sent with the registration (a served outstation uses the unsolicited ones)."""
+        if self.is_server:
+            return {'unsolicited': self.unsolicited, 'unsolicited_classes': list(self.unsolicited_classes)}
         return {'response_timeout': self.response_timeout, 'link_reset': self.link_reset,
                 'integrity_poll_interval': self.integrity_poll_interval, 'unsolicited': self.unsolicited,
                 'unsolicited_classes': list(self.unsolicited_classes)}
