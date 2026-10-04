@@ -153,9 +153,11 @@ BO_3,10,2,3,,,TRUE,TRUE,,FALSE
   Reservations on the device apply to VOLTTRON actors only; the master's writes are governed by `Remote Writable` alone.
 * The master's polls (class 0 for static data, classes 1 to 3 for the buffered events, integrity for all) are answered
   by the proxy; dnp3py's runner does not transmit unsolicited responses on its own, so events wait for an event poll.
-* On every (re)registration the proxy pushes its whole served table, so a proxy restart repairs the platform's values
-  and a platform restart (which re-registers) repairs nothing yet beyond `Starting Value`: two-way seeding is the next
-  step of the server-side plan.
+* Restarts. On every (re)registration the interface sends the equipment tree's current values with the point table,
+  the proxy applies them to served points it holds no value for, and then pushes its whole served table back. The proxy
+  manager relaunches a proxy that dies and the interface registers again, so a proxy crash costs nothing but the pause.
+  Across a platform driver restart the served values come from the agent's configuration store (`state/<device topic>`,
+  see the platform driver's documentation), which the driver reads into the tree before the device registers.
 
 ## Testing
 

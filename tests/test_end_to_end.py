@@ -16,7 +16,7 @@ pytest.importorskip('dnp3.outstation')
 HARNESS = Path(__file__).with_name('e2e_harness.py')
 SERVER_HARNESS = Path(__file__).with_name('e2e_server_harness.py')
 EXPECTED_CHECKS = 13
-EXPECTED_SERVER_CHECKS = 15
+EXPECTED_SERVER_CHECKS = 17
 
 
 def _free_port() -> int:

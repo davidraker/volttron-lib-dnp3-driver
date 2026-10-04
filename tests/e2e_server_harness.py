@@ -98,6 +98,36 @@ try:
     r, e = master.set_multiple_points([(M('AO_1'), 1)])
     check('control on a point that is not remote-writable is BLOCKED', r == {} and e.get(M('AO_1')) == 'status BLOCKED', str(e))
 
+    # A proxy crash: the manager notices, both interfaces set up again, and the served values come back from the
+    # platform's memory (the tree values sent with the re-registration) rather than from the starting values.
+    class Tree:
+        def __init__(self, agent): self.agent = agent
+        def get_node(self, topic):
+            flat = self.agent.flat()
+            return type('Node', (), {'last_value': flat[topic], 'last_updated': True})() if topic in flat else None
+    served_agent.pushed.clear()
+    served_agent.pushed.append({S('AI_2'): 230.5, S('AI_3'): 12.0, S('BI_0'): False, S('BO_0'): True, S('AO_0'): 250.0})
+    served.driver_agent.equipment_model = Tree(served_agent)
+    old_peer = served.proxy_peer
+    old_peer.process.terminate()
+    relaunched = wait_for(lambda: served.proxy_peer is not None and served.proxy_peer is not old_peer
+                          and served.proxy_peer.socket_params is not None and master.proxy_peer is served.proxy_peer, 20)
+    check('proxy relaunched after a crash and both remotes set up again', relaunched)
+
+    def master_reads():
+        """Both interfaces register again right after the peer is up; retry until the master's read goes through."""
+        try:
+            results, _ = master.get_multiple_points([M('AI_2')])
+            return bool(results)
+        except Exception:
+            return False
+    wait_for(master_reads, 20)
+    results, errors = master.get_multiple_points([M('AI_2'), M('AI_3'), M('BO_0'), M('AO_0'), M('AO_1')])
+    check('served values survive the proxy restart from the platform memory', abs(results.get(M('AI_2'), 0) - 230.5) < 1e-6
+          and results.get(M('AI_3')) == 12.0 and results.get(M('BO_0')) is True and results.get(M('AO_0')) == 250.0
+          and results.get(M('AO_1')) == 7.0, f'{results} {errors}')
+    served.driver_agent.equipment_model = None
+
     served_agent.pushed.clear()
     served.revert_all()
     results, _ = master.get_multiple_points([M('AI_2'), M('AO_0'), M('BO_0')])

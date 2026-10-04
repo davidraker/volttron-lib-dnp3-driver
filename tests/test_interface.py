@@ -307,13 +307,25 @@ class TestOutstationRole:
         assert method == 'REGISTER_REMOTE'
         assert {k: v for k, v in payload.items() if k != 'points'} == {
             'role': 'outstation', 'host': '127.0.0.1', 'port': 20010, 'master_address': 3, 'outstation_address': 4,
-            'unsolicited': False, 'unsolicited_classes': [1, 2, 3], 'remote_id': iface.remote_id.hex}
+            'unsolicited': False, 'unsolicited_classes': [1, 2, 3], 'remote_id': iface.remote_id.hex, 'values': {}}
         by_topic = {p['topic']: p for p in payload['points']}
         assert by_topic[TOPIC('AI_2')] == {'topic': TOPIC('AI_2'), 'group': 30, 'variation': 6, 'index': 2, 'scaling': 0.1,
                                            'control_code': 'latch', 'count': 1, 'on_time': 0, 'off_time': 0,
                                            'event_class': 1, 'remote_writable': False, 'initial_value': 240.1}
         assert (by_topic[TOPIC('BI_0')]['event_class'], by_topic[TOPIC('BI_0')]['initial_value']) == (2, None)
         assert by_topic[TOPIC('AO_1')]['remote_writable'] is False and by_topic[TOPIC('BO_3')]['remote_writable'] is True
+
+    def test_registration_carries_the_trees_current_values(self, make_interface, ppm, driver_agent):
+        from types import SimpleNamespace
+        nodes = {TOPIC('AI_2'): SimpleNamespace(last_value=231.0, last_updated=object()),
+                 TOPIC('BI_0'): SimpleNamespace(last_value=None, last_updated=None)}
+        driver_agent.equipment_model = SimpleNamespace(get_node=lambda t: nodes.get(t))
+        iface = make_interface(SERVED_POINTS, **SERVED)
+        iface.finalize_setup()
+        assert ppm.payloads('REGISTER_REMOTE')[0]['values'] == {TOPIC('AI_2'): 231.0}
+        master = make_interface(STANDARD_POINTS)
+        master.finalize_setup()
+        assert 'values' not in ppm.payloads('REGISTER_REMOTE')[1]
 
     def test_served_writes_store_values_and_are_reflected(self, make_interface, ppm, driver_agent):
         iface = make_interface(SERVED_POINTS, **SERVED)

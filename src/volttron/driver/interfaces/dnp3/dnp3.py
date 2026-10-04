@@ -159,8 +159,12 @@ class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
         return cast(Dnp3Register, register).point_fields(topic, served=self.is_server)
 
     def registration_payload(self) -> dict:
-        return {**self.identity_fields(), **self.config.connection_fields(),
-                'points': [self.point_fields(topic, register) for topic, register in self.point_map.items()]}
+        payload = {**self.identity_fields(), **self.config.connection_fields(),
+                   'points': [self.point_fields(topic, register) for topic, register in self.point_map.items()]}
+        if self.is_server:
+            # The platform's current values seed served points the proxy holds no value for (a proxy restart).
+            payload['values'] = self.tree_values()
+        return payload
 
     def after_registration(self, result: dict, initial_setup: bool):
         if self.is_server:

@@ -24,7 +24,7 @@ def ppm():
 
 @pytest.fixture
 def driver_agent():
-    return mock.Mock()
+    return mock.Mock(equipment_model=None)
 
 
 @pytest.fixture
