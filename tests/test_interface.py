@@ -119,7 +119,7 @@ class TestSetup:
         ppm.queue(serialized({}, {'outstation': 'group 99 is not a point the proxy reads'}))
         with caplog.at_level(logging.WARNING):
             interface.finalize_setup()
-        assert 'Failed to register DNP3 outstation' in caplog.text
+        assert 'Failed to register' in caplog.text and 'DNP3 Proxy' in caplog.text
 
     def test_proxy_group_selects_the_process(self, make_interface, ppm):
         iface = make_interface(proxy_group='plant-a')
@@ -239,14 +239,14 @@ class TestWrites:
 
 
 class TestUnsolicited:
-    def test_receive_unsolicited_publishes_pushed_values(self, interface, driver_agent):
+    def test_receive_push_publishes_pushed_values(self, interface, driver_agent):
         raw = serialized({TOPIC('AI_2'): 241.5, 'campus/other/der/BI_0': True})
-        interface.receive_unsolicited.__wrapped__(interface, None, raw)
+        interface.receive_push.__wrapped__(interface, None, raw)
         driver_agent.publish_push.assert_called_once_with({TOPIC('AI_2'): 241.5, 'campus/other/der/BI_0': True})
 
-    def test_receive_unsolicited_logs_errors_and_publishes_nothing(self, interface, driver_agent, caplog):
+    def test_receive_push_logs_errors_and_publishes_nothing(self, interface, driver_agent, caplog):
         with caplog.at_level(logging.WARNING):
-            interface.receive_unsolicited.__wrapped__(interface, None, serialized({}, {'link': 'lost'}))
-            interface.receive_unsolicited.__wrapped__(interface, None, b'not json')
-        assert 'Error received with unsolicited DNP3 values' in caplog.text and 'Undecodable' in caplog.text
+            interface.receive_push.__wrapped__(interface, None, serialized({}, {'link': 'lost'}))
+            interface.receive_push.__wrapped__(interface, None, b'not json')
+        assert 'Error received with pushed values from the DNP3 Proxy' in caplog.text and 'Undecodable' in caplog.text
         assert not driver_agent.publish_push.called
