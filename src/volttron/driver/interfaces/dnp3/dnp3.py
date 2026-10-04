@@ -129,8 +129,8 @@ class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
 
     def read_payload(self, topics: list[str], mode: str | None = None, classes=None, **kwargs) -> dict:
         """``mode`` is class (the remote's ``poll_classes``), integrity or points; polls use the remote's read mode."""
-        return {**self.config.outstation_fields(), 'mode': mode or self.config.read_mode.value,
-                'classes': list(classes or self.config.poll_classes), 'topics': list(topics)}
+        return {'mode': mode or self.config.read_mode.value, 'classes': list(classes or self.config.poll_classes),
+                'topics': list(topics)}
 
     def get_point(self, topic: str, **kwargs):
         kwargs.setdefault('mode', 'points')                     # one range read for the point asked for
@@ -152,8 +152,7 @@ class Dnp3(ProxyBackedInterface, BasicRevert, BaseInterface):
         for topic, value in items:
             register = cast(Dnp3Register, self.point_map[topic])
             batches[(register.control_mode or self.config.control_mode).value].append((topic, value))
-        return [({**self.config.outstation_fields(), 'control_mode': mode,
-                  'operations': [{'topic': topic, 'value': value} for topic, value in batch]}, batch)
+        return [({'control_mode': mode, 'operations': [{'topic': topic, 'value': value} for topic, value in batch]}, batch)
                 for mode, batch in batches.items()]
 
     # ---- helpers ----------------------------------------------------------------------------------------------

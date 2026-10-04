@@ -141,7 +141,7 @@ class TestReads:
         ppm.queue(serialized({TOPIC('AI_2'): reading(240.1), TOPIC('BI_0'): reading(True), TOPIC('CTR_5000'): reading(42),
                               TOPIC('AO_218'): reading(1200.0)}))
         results, errors = interface.get_multiple_points([TOPIC('AI_2'), TOPIC('BI_0'), TOPIC('CTR_5000'), TOPIC('AO_218')])
-        assert ppm.payloads('READ_POINTS') == [{**IDENTITY, 'mode': 'class', 'classes': [0],
+        assert ppm.payloads('READ_POINTS') == [{'mode': 'class', 'classes': [0],
                                                 'topics': [TOPIC('AI_2'), TOPIC('BI_0'), TOPIC('CTR_5000'), TOPIC('AO_218')]}]
         assert results == {TOPIC('AI_2'): 240.1, TOPIC('BI_0'): True, TOPIC('CTR_5000'): 42, TOPIC('AO_218'): 1200.0}
         assert isinstance(results[TOPIC('CTR_5000')], int) and errors == {}
@@ -156,7 +156,7 @@ class TestReads:
     def test_get_point_reads_that_point_by_range(self, interface, ppm):
         ppm.queue(serialized({TOPIC('AI_3'): reading(5000)}))
         assert interface.get_point(TOPIC('AI_3')) == 5000.0
-        assert ppm.payloads('READ_POINTS') == [{**IDENTITY, 'mode': 'points', 'classes': [0], 'topics': [TOPIC('AI_3')]}]
+        assert ppm.payloads('READ_POINTS') == [{'mode': 'points', 'classes': [0], 'topics': [TOPIC('AI_3')]}]
         ppm.queue(serialized({}, {TOPIC('AI_3'): 'not reported by outstation'}))
         with pytest.raises(RuntimeError, match='not reported by outstation'):
             interface.get_point(TOPIC('AI_3'))
@@ -196,7 +196,7 @@ class TestWrites:
     def test_set_point_sends_direct_operate_by_default(self, interface, ppm):
         ppm.queue(serialized({TOPIC('AO_218'): {'status': 'SUCCESS', 'value': 1200.0}}))
         assert interface.set_point(TOPIC('AO_218'), '1200') == 1200.0
-        assert ppm.payloads('WRITE_POINTS') == [{**IDENTITY, 'control_mode': 'direct',
+        assert ppm.payloads('WRITE_POINTS') == [{'control_mode': 'direct',
                                                  'operations': [{'topic': TOPIC('AO_218'), 'value': 1200.0}]}]
 
     def test_per_point_control_mode_splits_the_writes(self, interface, ppm):
@@ -234,7 +234,7 @@ class TestWrites:
     def test_revert_uses_the_default_value(self, interface, ppm):
         ppm.queue(serialized({TOPIC('AO_217'): {'status': 'SUCCESS', 'value': 1.0}}))
         interface.revert_point(TOPIC('AO_217'))
-        assert ppm.payloads('WRITE_POINTS') == [{**IDENTITY, 'control_mode': 'sbo',
+        assert ppm.payloads('WRITE_POINTS') == [{'control_mode': 'sbo',
                                                  'operations': [{'topic': TOPIC('AO_217'), 'value': 1.0}]}]
 
 
