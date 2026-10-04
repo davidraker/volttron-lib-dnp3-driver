@@ -239,10 +239,12 @@ class TestWrites:
 
 
 class TestUnsolicited:
-    def test_receive_push_publishes_pushed_values(self, interface, driver_agent):
+    def test_receive_push_publishes_own_points_and_drops_foreign_ones(self, interface, driver_agent, caplog):
         raw = serialized({TOPIC('AI_2'): 241.5, 'campus/other/der/BI_0': True})
-        interface.receive_push.__wrapped__(interface, None, raw)
-        driver_agent.publish_push.assert_called_once_with({TOPIC('AI_2'): 241.5, 'campus/other/der/BI_0': True})
+        with caplog.at_level(logging.WARNING):
+            interface.receive_push.__wrapped__(interface, None, raw)
+        driver_agent.publish_push.assert_called_once_with({TOPIC('AI_2'): 241.5})
+        assert 'does not serve' in caplog.text and 'campus/other/der/BI_0' in caplog.text
 
     def test_receive_push_logs_errors_and_publishes_nothing(self, interface, driver_agent, caplog):
         with caplog.at_level(logging.WARNING):
