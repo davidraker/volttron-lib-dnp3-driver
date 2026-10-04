@@ -110,7 +110,7 @@ class TestSetup:
         (method, payload, expects_reply), = ppm.sent
         assert method == 'REGISTER_OUTSTATION' and expects_reply
         assert payload == {**IDENTITY, 'response_timeout': 5.0, 'link_reset': True, 'integrity_poll_interval': 600.0,
-                           'unsolicited': True, 'unsolicited_classes': [1],
+                           'unsolicited': True, 'unsolicited_classes': [1], 'remote_id': iface.remote_id.hex,
                            'points': [iface.point_map[t].point_fields(t) for t in iface.point_map]}
         assert payload['points'][0] == {'topic': TOPIC('AI_2'), 'group': 30, 'variation': 6, 'index': 2, 'scaling': 0.1,
                                         'control_code': 'latch', 'count': 1, 'on_time': 0, 'off_time': 0}
