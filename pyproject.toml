@@ -8,7 +8,7 @@ profile = "black"
 [tool.poetry]
 name = "volttron-lib-dnp3-driver"
 version = "2.0.0rc1"
-description = "DNP3 (IEEE 1815) master driver interface for the VOLTTRON Platform Driver, served by the DNP3 Protocol Proxy."
+description = "DNP3 (IEEE 1815) driver interface for the VOLTTRON Platform Driver, served by the DNP3 Protocol Proxy."
 authors = ["VOLTTRON Team <volttron@pnnl.gov>"]
 license = "Apache-2.0"
 readme = "README.md"
