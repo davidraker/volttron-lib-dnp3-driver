@@ -65,16 +65,16 @@ class Dnp3Register(BaseRegister):
 
     def __init__(self, point: Dnp3PointConfig):
         # The base driver only distinguishes 'bit' from 'byte' to label booleans in publish metadata.
-        super().__init__('bit' if point.group in BIT_GROUPS else 'byte', not point.writable, point.volttron_point_name,
+        super().__init__('bit' if point.object_group in BIT_GROUPS else 'byte', not point.writable, point.volttron_point_name,
                          point.units, description=point.description or point.notes)
-        self.group = point.group
+        self.group = point.object_group
         self.variation = point.resolved_variation
         self.index = point.index
         self.scaling = point.scaling
         self.control_mode: ControlMode | None = point.control_mode
         self.control_code = point.control_code
         self.count, self.on_time, self.off_time = point.count, point.on_time, point.off_time
-        self.python_type = bool if point.group in BIT_GROUPS else int if point.group in COUNTER_GROUPS else float
+        self.python_type = bool if point.object_group in BIT_GROUPS else int if point.object_group in COUNTER_GROUPS else float
         self.default_value: Any = None     # Value to revert to, already coerced to python_type; None if unset.
         # Served outstations only.
         self.event_class = point.event_class

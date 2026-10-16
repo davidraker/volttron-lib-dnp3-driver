@@ -40,13 +40,13 @@ def wait_for(predicate, timeout=5.0):
     return predicate()
 
 
-rows = [dict(volttron_point_name='AI_2', group=30, variation=6, index=2, scaling=0.1, units='Volts', default_value='240.1'),
-        dict(volttron_point_name='AI_3', group=30, variation=6, index=3),                                   # no starting value
-        dict(volttron_point_name='BI_0', group=1, variation=2, index=0, default_value='TRUE', event_class=1),
-        dict(volttron_point_name='BO_0', group=10, variation=2, index=0, default_value='FALSE'),           # remote-writable
-        dict(volttron_point_name='AO_0', group=40, variation=1, index=0, scaling=10, default_value='100'),  # remote-writable
-        dict(volttron_point_name='AO_1', group=40, variation=1, index=1, remote_writable=False, default_value='7'),
-        dict(volttron_point_name='CTR_5', group=20, variation=1, index=5, default_value='42')]
+rows = [dict(volttron_point_name='AI_2', object_group=30, variation=6, index=2, scaling=0.1, units='Volts', default_value='240.1'),
+        dict(volttron_point_name='AI_3', object_group=30, variation=6, index=3),                                   # no starting value
+        dict(volttron_point_name='BI_0', object_group=1, variation=2, index=0, default_value='TRUE', event_class=1),
+        dict(volttron_point_name='BO_0', object_group=10, variation=2, index=0, default_value='FALSE'),           # remote-writable
+        dict(volttron_point_name='AO_0', object_group=40, variation=1, index=0, scaling=10, default_value='100'),  # remote-writable
+        dict(volttron_point_name='AO_1', object_group=40, variation=1, index=1, remote_writable=False, default_value='7'),
+        dict(volttron_point_name='CTR_5', object_group=20, variation=1, index=5, default_value='42')]
 
 served_agent, master_agent = Agent(), Agent()
 served = master = None
@@ -67,7 +67,7 @@ try:
                                response_timeout=5, integrity_poll_interval=0), driver_agent=master_agent)
     for row in rows:
         row = {k: v for k, v in row.items() if k not in ('default_value', 'event_class', 'remote_writable')}
-        row['writable'] = row['group'] in (10, 40)
+        row['writable'] = row['object_group'] in (10, 40)
         master.insert_register(master.create_register(Dnp3PointConfig(**row)), 'campus/b/master')
     master.finalize_setup(initial_setup=True)
     check('master registered with the same proxy', master.proxy_peer is served.proxy_peer and master.proxy_peer is not None)

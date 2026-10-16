@@ -71,7 +71,7 @@ vctl config store platform.driver devices/campus/building/der example-config/dnp
 ## Registry configuration
 
 ```csv
-Point Name,Volttron Point Name,Group,Variation,Index,Scaling,Units,Writable,Control Mode,Control Code,Notes
+point_name,volttron_point_name,object_group,variation,index,scaling,units,writable,control_mode,control_code,notes
 DGEN.VMinRtg,AI_2,30,6,2,0.1,Volts,FALSE,,,Nameplate Minimum Voltage Rating
 DVVR.VVArCrv,AO_217,40,4,217,1,,TRUE,sbo,,Volt-VAr curve edit selector
 DOPR.PermOp,BO_3,10,2,3,,,TRUE,,latch,Permit service
@@ -82,7 +82,7 @@ DGEN.WHrtg,CTR_5000,20,1,5000,1,Wh,FALSE,,,Energy counter
 |---|---|
 | `Volttron Point Name` | The point's name on the platform. Required. |
 | `Point Name` | The point's name on the outstation (an IEC 61850 object in a MESA profile). Informational. |
-| `Group`, `Variation`, `Index` | The point's DNP3 object group, variation and index. Groups read: 1, 2 (binary inputs), 3, 4 (double-bit inputs), 10, 11 (binary outputs), 20, 21, 22 (counters), 30, 32 (analog inputs), 40, 42 (analog outputs). A blank variation takes the usual one for the group (g1v2, g10v2, g20v1, g30v6, g40v4). For a writable analog output the registered group 40 variation also picks the group 41 command variation (1 INT32, 2 INT16, 3 FLT32, 4 FLT64). |
+| `object_group`, `variation`, `index` | The point's DNP3 object group, variation and index. `Group`, the column of earlier registry files, is still read as the object group with a deprecation warning; `group` is refused because elsewhere it names the polling group (`polling_group`, as for every other interface). Groups read: 1, 2 (binary inputs), 3, 4 (double-bit inputs), 10, 11 (binary outputs), 20, 21, 22 (counters), 30, 32 (analog inputs), 40, 42 (analog outputs). A blank variation takes the usual one for the group (g1v2, g10v2, g20v1, g30v6, g40v4). For a writable analog output the registered group 40 variation also picks the group 41 command variation (1 INT32, 2 INT16, 3 FLT32, 4 FLT64). |
 | `Scaling` | Multiplier applied by the proxy: published value = outstation value x scaling; writes divide by it. Blank is 1. |
 | `Units` | Units reported in the publish metadata. |
 | `Writable` | TRUE for an output the platform may operate. Only groups 10 and 40 may be writable, except for served points (`Data Source` `server`), which the platform writes whatever their group. |
@@ -135,7 +135,7 @@ With `"driver_role": "outstation"` the device *is* an outstation: the proxy list
 ```
 
 ```csv
-Volttron Point Name,Group,Variation,Index,Scaling,Units,Writable,Remote Writable,Class,Starting Value
+volttron_point_name,object_group,variation,index,scaling,units,writable,remote_writable,event_class,default_value
 AI_2,30,6,2,0.1,Volts,TRUE,,1,240.0
 BI_0,1,2,0,,,TRUE,,2,FALSE
 AO_1,40,1,1,10,,TRUE,TRUE,,100

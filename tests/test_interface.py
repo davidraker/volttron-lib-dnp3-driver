@@ -21,7 +21,7 @@ class TestPointConfig:
         row = {'Point Name': 'DGEN.VMinRtg', 'Volttron Point Name': 'AI_2', 'Group': '30', 'Variation': '6', 'Index': '2',
                'Scaling': '0.1', 'Units': 'Volts', 'Writable': 'FALSE', 'Transform': 'scale(0.1)', 'Notes': 'Nameplate'}
         cfg = Dnp3PointConfig(**row)
-        assert (cfg.point_name, cfg.volttron_point_name, cfg.group, cfg.variation, cfg.index) == ('DGEN.VMinRtg', 'AI_2', 30, 6, 2)
+        assert (cfg.point_name, cfg.volttron_point_name, cfg.object_group, cfg.variation, cfg.index) == ('DGEN.VMinRtg', 'AI_2', 30, 6, 2)
         assert cfg.scaling == 0.1 and cfg.writable is False and cfg.transform == 'scale(0.1)' and cfg.notes == 'Nameplate'
         assert cfg.control_mode is None and cfg.control_code is ControlCode.latch and cfg.resolved_variation == 6
 
@@ -36,17 +36,31 @@ class TestPointConfig:
                                  'Control Mode': 'SBO', 'Control Code': 'Pulse', 'On Time': 250, 'Off Time': 50, 'Count': 3})
         assert cfg.control_mode is ControlMode.sbo and cfg.control_code is ControlCode.pulse
         assert (cfg.on_time, cfg.off_time, cfg.count) == (250, 50, 3)
-        assert Dnp3PointConfig(volttron_point_name='x', group=40, index=1, multiplier='0.5').scaling == 0.5
+        assert Dnp3PointConfig(volttron_point_name='x', object_group=40, index=1, multiplier='0.5').scaling == 0.5
+
+    def test_object_group_column_names_and_polling_group(self, caplog):
+        # `object_group` / `Object Group` name the DNP3 object group; `polling_group` is the platform driver's group.
+        cfg = Dnp3PointConfig(**{'Volttron Point Name': 'x', 'Object Group': '30', 'Index': '1', 'polling_group': 'fast'})
+        assert (cfg.object_group, cfg.polling_group) == (30, 'fast')
+        # `Group`, the column of earlier registry files, still reads as the object group with a deprecation warning.
+        import volttron.driver.interfaces.dnp3.config as config_module
+        config_module._group_column_warned = False
+        with caplog.at_level('WARNING'):
+            cfg = Dnp3PointConfig(**{'Volttron Point Name': 'x', 'Group': '30', 'Index': '1'})
+        assert (cfg.object_group, cfg.polling_group) == (30, None) and 'deprecated' in caplog.text
+        # `group` is refused: in a DNP3 registry it could mean either.
+        with pytest.raises(ValueError, match='object_group'):
+            Dnp3PointConfig(volttron_point_name='x', group=30, index=1)
 
     def test_rejections(self):
         with pytest.raises(ValidationError, match='not one the DNP3 driver reads'):
-            Dnp3PointConfig(volttron_point_name='x', group=12, index=0)
+            Dnp3PointConfig(volttron_point_name='x', object_group=12, index=0)
         with pytest.raises(ValidationError, match='not an output and cannot be writable'):
-            Dnp3PointConfig(volttron_point_name='x', group=30, index=0, writable=True)
+            Dnp3PointConfig(volttron_point_name='x', object_group=30, index=0, writable=True)
         with pytest.raises(ValidationError):
-            Dnp3PointConfig(volttron_point_name='x', group=10, index=0, writable=True, control_mode='maybe')
+            Dnp3PointConfig(volttron_point_name='x', object_group=10, index=0, writable=True, control_mode='maybe')
         with pytest.raises(ValidationError):
-            Dnp3PointConfig(volttron_point_name='x', group=10, index=0, count=0)
+            Dnp3PointConfig(volttron_point_name='x', object_group=10, index=0, count=0)
 
 
 class TestRemoteConfig:
@@ -283,11 +297,11 @@ class TestOutstationRole:
         row = Dnp3PointConfig(**{'Volttron Point Name': 'AI_2', 'Group': '30', 'Index': '2', 'Writable': 'TRUE',
                                  'Data Source': 'server', 'Class': '2', 'Remote Writable': '', 'Starting Value': '5'})
         assert row.is_served and row.event_class == 2 and row.resolved_remote_writable is False and row.default_value == '5'
-        assert Dnp3PointConfig(volttron_point_name='x', group=10, index=0, data_source='server').resolved_remote_writable
+        assert Dnp3PointConfig(volttron_point_name='x', object_group=10, index=0, data_source='server').resolved_remote_writable
         with pytest.raises(ValidationError, match='cannot be writable'):
-            Dnp3PointConfig(volttron_point_name='x', group=30, index=0, writable=True)      # not served: still refused
+            Dnp3PointConfig(volttron_point_name='x', object_group=30, index=0, writable=True)      # not served: still refused
         with pytest.raises(ValidationError):
-            Dnp3PointConfig(volttron_point_name='x', group=30, index=0, data_source='server', event_class=4)
+            Dnp3PointConfig(volttron_point_name='x', object_group=30, index=0, data_source='server', event_class=4)
 
     def test_prepare_registry_config_defaults_served_rows(self, make_interface):
         iface = make_interface(**SERVED)

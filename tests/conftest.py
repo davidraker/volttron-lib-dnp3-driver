@@ -13,7 +13,7 @@ def reading(value, quality=1, online=True):
 
 
 def point(name, group, index, variation=None, writable=False, **extra):
-    return Dnp3PointConfig(volttron_point_name=name, group=group, index=index, variation=variation, writable=writable,
+    return Dnp3PointConfig(volttron_point_name=name, object_group=group, index=index, variation=variation, writable=writable,
                            units=extra.pop('units', ''), **extra)
 
 

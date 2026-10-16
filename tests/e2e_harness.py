@@ -31,16 +31,16 @@ iface = None
 try:
     iface = Dnp3(RemoteConfig(driver_type='dnp3', outstation_ip='127.0.0.1', port=PORT, master_id=2, outstation_id=1,
                               response_timeout=5, integrity_poll_interval=0), driver_agent=Agent())
-    rows = [dict(volttron_point_name='AI_2', group=30, variation=6, index=2, scaling=0.1, units='Volts'),
-            dict(volttron_point_name='AI_3', group=30, variation=6, index=3, units='W'),
-            dict(volttron_point_name='AI_9', group=30, variation=6, index=9),                        # not on the outstation
-            dict(volttron_point_name='BI_0', group=1, variation=2, index=0),
-            dict(volttron_point_name='BI_1', group=1, variation=2, index=1),
-            dict(volttron_point_name='BO_0', group=10, variation=2, index=0, writable=True),
-            dict(volttron_point_name='BO_1', group=10, variation=2, index=1, writable=True, control_mode='sbo'),
-            dict(volttron_point_name='AO_0', group=40, variation=1, index=0, writable=True, scaling=10, default_value='100'),
-            dict(volttron_point_name='AO_1', group=40, variation=1, index=1, writable=True, control_mode='sbo'),
-            dict(volttron_point_name='CTR_5000', group=20, variation=1, index=5000)]
+    rows = [dict(volttron_point_name='AI_2', object_group=30, variation=6, index=2, scaling=0.1, units='Volts'),
+            dict(volttron_point_name='AI_3', object_group=30, variation=6, index=3, units='W'),
+            dict(volttron_point_name='AI_9', object_group=30, variation=6, index=9),                        # not on the outstation
+            dict(volttron_point_name='BI_0', object_group=1, variation=2, index=0),
+            dict(volttron_point_name='BI_1', object_group=1, variation=2, index=1),
+            dict(volttron_point_name='BO_0', object_group=10, variation=2, index=0, writable=True),
+            dict(volttron_point_name='BO_1', object_group=10, variation=2, index=1, writable=True, control_mode='sbo'),
+            dict(volttron_point_name='AO_0', object_group=40, variation=1, index=0, writable=True, scaling=10, default_value='100'),
+            dict(volttron_point_name='AO_1', object_group=40, variation=1, index=1, writable=True, control_mode='sbo'),
+            dict(volttron_point_name='CTR_5000', object_group=20, variation=1, index=5000)]
     for row in rows:
         iface.insert_register(iface.create_register(Dnp3PointConfig(**row)), 'campus/b/der')
     t0 = time.time(); iface.finalize_setup(initial_setup=True); t_setup = time.time() - t0

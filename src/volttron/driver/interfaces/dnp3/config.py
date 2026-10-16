@@ -1,3 +1,4 @@
+import logging
 # -*- coding: utf-8 -*- {{{
 # ===----------------------------------------------------------------------===
 #
@@ -75,11 +76,17 @@ def _blank_to_none(value):
     return None if isinstance(value, str) and value.strip() == '' else value
 
 
+_log = logging.getLogger(__name__)
+_group_column_warned = False
+
+
 class Dnp3PointConfig(PointConfig):
     """One registry row. Column headers as the discovery tooling writes them are accepted alongside snake_case."""
     # The point's name on the outstation (an IEC 61850 object such as DGEN.VMinRtg in a MESA profile); informational.
     point_name: str = Field(default='', validation_alias=AliasChoices('point_name', 'Point Name'))
-    group: int = Field(validation_alias=AliasChoices('group', 'Group'))
+    # The DNP3 object group (30 analog inputs, 40 analog outputs, ...). `Group`, the column of earlier registry files,
+    # is still read with a deprecation warning; `group` is refused, since elsewhere it names the polling group.
+    object_group: int = Field(validation_alias=AliasChoices('object_group', 'Object Group'))
     variation: int | None = Field(default=None, validation_alias=AliasChoices('variation', 'Variation'))
     index: int = Field(validation_alias=AliasChoices('index', 'Index'))
     # Engineering value = outstation value * scaling; writes divide by it. The proxy applies it.
@@ -103,6 +110,17 @@ class Dnp3PointConfig(PointConfig):
     def _blank_optionals(cls, data):
         if isinstance(data, dict):
             data = dict(data)
+            if 'group' in data:
+                raise ValueError(f"Point {data.get('volttron_point_name', data.get('Volttron Point Name', '?'))}: 'group' is"
+                                 f" ambiguous in a DNP3 registry; use 'object_group' for the DNP3 object group or"
+                                 f" 'polling_group' for the platform driver's polling group.")
+            if 'Group' in data:
+                global _group_column_warned
+                if not _group_column_warned:
+                    _log.warning("DNP3 registry column 'Group' is deprecated; rename it 'object_group' (it is the DNP3"
+                                 " object group, not the platform driver's polling group).")
+                    _group_column_warned = True
+                data['object_group'] = data.pop('Group')
             for key in list(data):
                 if key in ('variation', 'Variation', 'scaling', 'Scaling', 'multiplier', 'Multiplier', 'control_mode',
                            'Control Mode', 'control_code', 'Control Code', 'count', 'Count', 'on_time', 'On Time',
@@ -118,11 +136,11 @@ class Dnp3PointConfig(PointConfig):
 
     @model_validator(mode='after')
     def _check_group(self):
-        if self.group not in SUPPORTED_GROUPS:
-            raise ValueError(f'Point {self.volttron_point_name}: group {self.group} is not one the DNP3 driver reads'
+        if self.object_group not in SUPPORTED_GROUPS:
+            raise ValueError(f'Point {self.volttron_point_name}: group {self.object_group} is not one the DNP3 driver reads'
                              f' ({sorted(SUPPORTED_GROUPS)}).')
-        if self.writable and self.group not in OUTPUT_GROUPS and not self.is_served:
-            raise ValueError(f'Point {self.volttron_point_name}: group {self.group} is not an output and cannot be writable.')
+        if self.writable and self.object_group not in OUTPUT_GROUPS and not self.is_served:
+            raise ValueError(f'Point {self.volttron_point_name}: group {self.object_group} is not an output and cannot be writable.')
         return self
 
     @property
@@ -133,11 +151,11 @@ class Dnp3PointConfig(PointConfig):
     @property
     def resolved_remote_writable(self) -> bool:
         """Whether a remote master may operate this served point: as configured, else when it is an output."""
-        return self.remote_writable if self.remote_writable is not None else self.group in OUTPUT_GROUPS
+        return self.remote_writable if self.remote_writable is not None else self.object_group in OUTPUT_GROUPS
 
     @property
     def resolved_variation(self) -> int:
-        return self.variation if self.variation else DEFAULT_VARIATIONS.get(self.group, 1)
+        return self.variation if self.variation else DEFAULT_VARIATIONS.get(self.object_group, 1)
 
 
 class Dnp3RemoteConfig(RemoteConfig):
